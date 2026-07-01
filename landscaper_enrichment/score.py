@@ -21,6 +21,8 @@ import csv
 import json
 import os
 
+import confirmed_companies
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 REVENUE_PER_EMPLOYEE = 120_000
@@ -90,6 +92,25 @@ def load_govt_contracts():
 
 
 def score_record(domain: str, signals: dict, govt_contracts: dict) -> dict:
+    # if this pipeline candidate is actually one of our known trade-press
+    # companies, use its verified data instead of estimating from scratch
+    confirmed = confirmed_companies.BY_DOMAIN.get(domain)
+    if confirmed:
+        company, city, state, revenue, trade_press_confidence, notes, _ = confirmed
+        priority = "Low"
+        reason = f"Matched trade-press company '{company}' -- {notes}"
+        return {
+            "estimated_employees": None,
+            "employee_source": "matched_trade_press_company",
+            "confirmed_federal_contracts_usd": govt_contracts.get(domain, {}).get("total_federal_landscaping_awards_usd", 0) or 0,
+            "estimated_revenue_usd": revenue,
+            "likely_over_5m": True if revenue else (trade_press_confidence.startswith("Confirmed")),
+            "confidence": "confirmed_trade_press",
+            "fallback_score": fallback_score(signals),
+            "manual_verification_priority": priority,
+            "manual_verification_reason": reason,
+        }
+
     govt = govt_contracts.get(domain, {})
     confirmed_govt_usd = govt.get("total_federal_landscaping_awards_usd", 0) or 0
 
@@ -191,8 +212,9 @@ def main():
             "sample_url": r.get("sample_url"),
         })
 
-    # verified federal contracts first, then employee-based estimates, then fallback score
+    # verified trade-press/federal data first, then employee-based estimates, then fallback score
     confidence_rank = {
+        "confirmed_trade_press": 0,
         "confirmed_federal_contracts": 0,
         "employee_based": 1,
         "partial_federal_contracts_only": 2,
