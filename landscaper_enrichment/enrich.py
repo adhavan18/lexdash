@@ -15,7 +15,7 @@ EXTRACT_SCHEMA = {
     "type": "object",
     "properties": {
         "years_in_business": {"type": "number", "description": "How many years the company has operated, if stated"},
-        "employee_count": {"type": "number", "description": "Number of employees, if stated anywhere on the site"},
+        "employee_count": {"type": "number", "description": "Number of employees/team members/staff, if stated anywhere on the site (About, Careers, Our Team pages often mention this, e.g. '150+ employees' or 'team of 200')"},
         "fleet_size": {"type": "number", "description": "Number of trucks/vehicles/crews mentioned, if any"},
         "service_areas": {"type": "array", "items": {"type": "string"}, "description": "Cities/regions served"},
         "client_types": {
@@ -31,9 +31,12 @@ EXTRACT_SCHEMA = {
 
 EXTRACT_PROMPT = (
     "Extract company size and scale signals from this landscaping company's "
-    "website: years in business, employee count, fleet/crew size, service "
-    "areas, client types served, certifications, and whether it has multiple "
-    "branch locations. Leave fields blank if not stated; do not guess."
+    "website. Employee count is the most important field -- check About Us, "
+    "Careers, Our Team, and homepage hero text for phrasing like 'our team of "
+    "X', 'X employees', 'X+ crew members', or similar. Also extract: years in "
+    "business, fleet/truck/crew count, service areas, client types served, "
+    "certifications, and whether it has multiple branch locations. Leave "
+    "fields blank if not stated; do not guess or estimate."
 )
 
 

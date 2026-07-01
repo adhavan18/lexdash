@@ -103,35 +103,42 @@ def main():
             if cell.value is not None:
                 cell.number_format = "$#,##0"
 
-    # Sheet 2: pipeline candidates (Apify/Firecrawl discovered, scored, unverified revenue)
+    # Sheet 2: pipeline candidates (Apify/Firecrawl discovered, employee-based revenue estimate)
     ws2 = wb.create_sheet("Pipeline Candidates")
-    headers2 = ["Domain", "Region", "State", "Score", "Likely >$5M", "Review Count",
-                "Employee Count", "Years in Business", "Fleet Size", "Client Types", "Website"]
+    headers2 = ["Domain", "Region", "State", "Estimated Employees", "Employee Source",
+                "Estimated Revenue (USD)", "Likely >$5M", "Fallback Score", "Review Count",
+                "Years in Business", "Fleet Size", "Client Types", "Website"]
     ws2.append(headers2)
     style_header(ws2, len(headers2))
     for r in scored_rows:
         state = parse_state(r.get("region", ""))
         ws2.append([
-            r.get("domain"), r.get("region"), state, r.get("score"), r.get("likely_over_5m"),
-            r.get("review_count") or r.get("review_count", ""), r.get("employee_count"),
+            r.get("domain"), r.get("region"), state, r.get("estimated_employees"),
+            r.get("employee_source"), r.get("estimated_revenue_usd"), r.get("likely_over_5m"),
+            r.get("fallback_score"), r.get("review_count"),
             r.get("years_in_business"), r.get("fleet_size"), r.get("client_types"), r.get("sample_url"),
         ])
     for i, h in enumerate(headers2, 1):
         ws2.column_dimensions[get_column_letter(i)].width = max(16, len(h) + 4)
-    ws2.column_dimensions["K"].width = 40
+    ws2.column_dimensions["M"].width = 40
+    for row in ws2.iter_rows(min_row=2, min_col=6, max_col=6):
+        for cell in row:
+            if cell.value not in (None, ""):
+                cell.number_format = "$#,##0"
 
     # Sheet 3: everything grouped by region/state (confirmed + pipeline combined)
     ws3 = wb.create_sheet("By Region & State")
-    headers3 = ["Region", "State", "Company/Domain", "Source", "Revenue or Score"]
+    headers3 = ["Region", "State", "Company/Domain", "Source", "Revenue (confirmed or estimated)"]
     ws3.append(headers3)
     style_header(ws3, len(headers3))
 
     combined = []
     for company, city, state, revenue, confidence, notes in CONFIRMED_ROWS:
-        combined.append((STATE_TO_REGION.get(state, "Unknown"), state, company, "Trade Press", revenue))
+        combined.append((STATE_TO_REGION.get(state, "Unknown"), state, company, "Trade Press (confirmed)", revenue))
     for r in scored_rows:
         state = parse_state(r.get("region", ""))
-        combined.append((STATE_TO_REGION.get(state, "Unknown"), state, r.get("domain"), "Pipeline", r.get("score")))
+        combined.append((STATE_TO_REGION.get(state, "Unknown"), state, r.get("domain"),
+                          "Pipeline (employee-based estimate)", r.get("estimated_revenue_usd")))
 
     combined.sort(key=lambda x: (x[0], x[1]))
     for row in combined:
@@ -139,6 +146,10 @@ def main():
     for i, h in enumerate(headers3, 1):
         ws3.column_dimensions[get_column_letter(i)].width = max(18, len(h) + 4)
     ws3.column_dimensions["C"].width = 30
+    for row in ws3.iter_rows(min_row=2, min_col=5, max_col=5):
+        for cell in row:
+            if cell.value not in (None, ""):
+                cell.number_format = "$#,##0"
 
     # Sheet 4: notes
     ws4 = wb.create_sheet("Notes")
@@ -151,8 +162,24 @@ def main():
         [""],
         [f"'Pipeline Candidates' tab: {len(scored_rows)} companies discovered via"],
         ["apify_discover.py (Google Maps) + enrich.py (website scraping) + score.py."],
-        ["The 'Score' and 'Likely >$5M' columns are a HEURISTIC, not verified revenue --"],
-        ["treat this as a ranked shortlist to manually spot-check, not a ground truth."],
+        [""],
+        ["Revenue is now ESTIMATED FROM EMPLOYEE COUNT: commercial landscaping is"],
+        ["labor-intensive with a fairly consistent revenue-per-employee ratio industry-wide."],
+        ["  Estimated Revenue = Estimated Employees x $120,000/employee (score.py's"],
+        ["  REVENUE_PER_EMPLOYEE constant -- adjust if you have a better benchmark)."],
+        ["  Estimated Employees comes from (in priority order):"],
+        ["    1. employee_count stated directly on the company website (most reliable)"],
+        ["    2. fleet_size x 2.5 (crew-size proxy) when headcount isn't stated but a"],
+        ["       fleet/truck count is mentioned"],
+        ["    3. unknown -- no employee estimate available, 'Likely >$5M' defaults to False"],
+        ["       and 'Fallback Score' (the old multi-factor heuristic: years in business,"],
+        ["       service area count, client types, review count/rating) is the only signal"],
+        ["       -- use it to rank/spot-check, not as a revenue estimate."],
+        [""],
+        ["This is still an ESTIMATE, not verified revenue -- most company websites don't"],
+        ["state headcount, so many rows will have no employee estimate at all. Pair with"],
+        ["USASpending.gov contract-value lookups for companies doing government work for"],
+        ["actual dollar verification on that subset."],
         [""],
         ["To grow the Pipeline Candidates count toward 500+:"],
         ["  Run apify_discover.py once per additional region, e.g.:"],
