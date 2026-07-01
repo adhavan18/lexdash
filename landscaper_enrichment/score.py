@@ -115,6 +115,9 @@ def score_record(domain: str, signals: dict, govt_contracts: dict) -> dict:
         likely_over_5m = False
         confidence = "fallback_heuristic_only"
 
+    fb_score = fallback_score(signals)
+    priority, reason = manual_verification_priority(confidence, employee_source, estimated_revenue, fb_score)
+
     return {
         "estimated_employees": employees,
         "employee_source": employee_source,
@@ -122,8 +125,40 @@ def score_record(domain: str, signals: dict, govt_contracts: dict) -> dict:
         "estimated_revenue_usd": estimated_revenue,
         "likely_over_5m": likely_over_5m,
         "confidence": confidence,
-        "fallback_score": fallback_score(signals),
+        "fallback_score": fb_score,
+        "manual_verification_priority": priority,
+        "manual_verification_reason": reason,
     }
+
+
+# how close an estimate has to be to the $5M line to be worth a second look
+BORDERLINE_BAND = (0.6, 1.6)  # 0.6x-1.6x of REVENUE_THRESHOLD
+STRONG_FALLBACK_SCORE = 0.4
+
+
+def manual_verification_priority(confidence, employee_source, estimated_revenue, fb_score):
+    """Flags which rows are worth spending manual/paid verification effort on,
+    vs. ones the pipeline is already reasonably confident about either way."""
+    if confidence == "confirmed_federal_contracts":
+        return "Low", "Already verified via federal contract data"
+
+    if confidence == "employee_based" and employee_source == "stated_on_website":
+        if estimated_revenue and BORDERLINE_BAND[0] * REVENUE_THRESHOLD <= estimated_revenue <= BORDERLINE_BAND[1] * REVENUE_THRESHOLD:
+            return "Medium", "Direct headcount data, but estimate sits close to the $5M line"
+        return "Low", "Direct headcount stated on company site -- reasonably reliable estimate"
+
+    if confidence == "employee_based":
+        if estimated_revenue and BORDERLINE_BAND[0] * REVENUE_THRESHOLD <= estimated_revenue <= BORDERLINE_BAND[1] * REVENUE_THRESHOLD:
+            return "High", f"Estimate from proxy ({employee_source}) sits close to the $5M line -- verify"
+        return "Medium", f"Employee count is a proxy estimate ({employee_source}), not stated directly"
+
+    if confidence == "partial_federal_contracts_only":
+        return "Medium", "Has some confirmed federal $ but not enough alone; no employee signal to add"
+
+    # fallback_heuristic_only: no employee or contract signal at all
+    if fb_score >= STRONG_FALLBACK_SCORE:
+        return "High", "No employee/contract data, but strong secondary signals (reviews, portfolio, tenure) -- worth manual check"
+    return "Low", "Weak signals across the board -- deprioritize"
 
 
 def main():
@@ -178,10 +213,12 @@ def main():
     with_employees = [r for r in rows if r["estimated_employees"] is not None]
     flagged = [r for r in rows if r["likely_over_5m"]]
     confirmed = [r for r in rows if r["confidence"] == "confirmed_federal_contracts"]
+    high_priority = [r for r in rows if r["manual_verification_priority"] == "High"]
     print(f"Scored {len(rows)} companies")
     print(f"  {len(with_employees)} have an employee estimate (stated, job-postings, fleet, or branch-derived)")
     print(f"  {len(confirmed)} have verified federal contract dollars alone clearing $5M")
     print(f"  {len(flagged)} total flagged as likely >$5M")
+    print(f"  {len(high_priority)} flagged 'High' manual-verification priority -- worth the paid/manual follow-up")
     print(f"Full results: {out_path}")
 
 

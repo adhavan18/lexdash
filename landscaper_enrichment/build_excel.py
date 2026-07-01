@@ -107,8 +107,9 @@ def main():
     ws2 = wb.create_sheet("Pipeline Candidates")
     headers2 = ["Domain", "Region", "State", "Confidence", "Estimated Employees", "Employee Source",
                 "Estimated Revenue (USD)", "Confirmed Federal Contracts (USD)", "Likely >$5M",
-                "Fallback Score", "Review Count", "Years in Business", "Fleet Size", "Location Count",
-                "Client Portfolio Size", "Sqft/Acreage Managed", "Indeed Job Postings", "Client Types", "Website"]
+                "Verify Priority", "Verify Reason", "Fallback Score", "Review Count",
+                "Years in Business", "Fleet Size", "Location Count", "Client Portfolio Size",
+                "Sqft/Acreage Managed", "Indeed Job Postings", "Client Types", "Website"]
     ws2.append(headers2)
     style_header(ws2, len(headers2))
     for r in scored_rows:
@@ -117,19 +118,55 @@ def main():
             r.get("domain"), r.get("region"), state, r.get("confidence"),
             r.get("estimated_employees"), r.get("employee_source"),
             r.get("estimated_revenue_usd"), r.get("confirmed_federal_contracts_usd"),
-            r.get("likely_over_5m"), r.get("fallback_score"), r.get("review_count"),
+            r.get("likely_over_5m"), r.get("manual_verification_priority"),
+            r.get("manual_verification_reason"), r.get("fallback_score"), r.get("review_count"),
             r.get("years_in_business"), r.get("fleet_size"), r.get("location_count"),
             r.get("client_portfolio_size"), r.get("sqft_or_acreage_managed"),
             r.get("indeed_job_postings"), r.get("client_types"), r.get("sample_url"),
         ])
     for i, h in enumerate(headers2, 1):
         ws2.column_dimensions[get_column_letter(i)].width = max(16, len(h) + 4)
-    ws2.column_dimensions["S"].width = 40
+    ws2.column_dimensions["K"].width = 55
+    ws2.column_dimensions["U"].width = 40
     for col in ("G", "H"):
         for row in ws2.iter_rows(min_row=2, min_col=ord(col) - 64, max_col=ord(col) - 64):
             for cell in row:
                 if cell.value not in (None, ""):
                     cell.number_format = "$#,##0"
+
+    priority_fill = {
+        "High": PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid"),
+        "Medium": PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid"),
+        "Low": PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
+    }
+    for row in ws2.iter_rows(min_row=2, min_col=10, max_col=10):
+        for cell in row:
+            fill = priority_fill.get(cell.value)
+            if fill:
+                cell.fill = fill
+
+    # Sheet: shortlist of rows worth spending manual/paid verification effort on
+    ws2b = wb.create_sheet("Needs Manual Verification")
+    headers2b = ["Domain", "Region", "State", "Verify Priority", "Verify Reason",
+                 "Estimated Revenue (USD)", "Confidence", "Website"]
+    ws2b.append(headers2b)
+    style_header(ws2b, len(headers2b))
+    high_priority_rows = [r for r in scored_rows if r.get("manual_verification_priority") == "High"]
+    for r in high_priority_rows:
+        state = parse_state(r.get("region", ""))
+        ws2b.append([
+            r.get("domain"), r.get("region"), state, r.get("manual_verification_priority"),
+            r.get("manual_verification_reason"), r.get("estimated_revenue_usd"),
+            r.get("confidence"), r.get("sample_url"),
+        ])
+    for i, h in enumerate(headers2b, 1):
+        ws2b.column_dimensions[get_column_letter(i)].width = max(16, len(h) + 4)
+    ws2b.column_dimensions["E"].width = 55
+    ws2b.column_dimensions["H"].width = 40
+    for row in ws2b.iter_rows(min_row=2, min_col=6, max_col=6):
+        for cell in row:
+            if cell.value not in (None, ""):
+                cell.number_format = "$#,##0"
 
     # Sheet 3: everything grouped by region/state (confirmed + pipeline combined)
     ws3 = wb.create_sheet("By Region & State")
@@ -193,6 +230,20 @@ def main():
         ["websites don't state headcount, so many rows will fall back to weaker proxies or"],
         ["no employee estimate at all -- treat this as a ranked shortlist to manually verify,"],
         ["not ground truth."],
+        [""],
+        ["'Verify Priority' / 'Verify Reason' columns (also color-coded green/yellow/red in"],
+        ["the Pipeline Candidates tab) tell you WHICH rows to trust as-is vs. which need a"],
+        ["manual or paid check before you act on them:"],
+        ["  Low (green)    = confirmed federal contracts, or a direct employee count stated"],
+        ["                   on the company's own site -- reasonably trustworthy as-is."],
+        ["  Medium (yellow)= revenue estimate comes from a proxy (job postings/fleet/branch"],
+        ["                   count), not a stated number -- directionally useful, not precise."],
+        ["  High (red)     = either the estimate sits right on the $5M line (could go either"],
+        ["                   way) or there's no employee/contract signal at all and the row"],
+        ["                   is ranked only by soft signals (reviews, tenure, portfolio size)."],
+        ["                   These are the rows worth spending manual research or a paid tool"],
+        ["                   (D&B, ZoomInfo) on before treating them as qualified."],
+        ["The 'Needs Manual Verification' tab is pre-filtered to just the High-priority rows."],
         [""],
         ["To add the federal contract check: python usaspending_enrich.py (free API, no key"],
         ["needed) before running score.py -- it writes data/govt_contracts.json which"],
