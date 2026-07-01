@@ -49,6 +49,9 @@ def enrich_candidates(candidates, sleep_between=1.0):
         except Exception as e:
             print(f"  extract failed: {e}")
             record["signals"] = {}
+        # carry over Maps-sourced signals (present when discovered via apify_discover.py)
+        record["signals"]["review_count"] = c.get("review_count")
+        record["signals"]["rating"] = c.get("rating")
         enriched.append(record)
         time.sleep(sleep_between)
     return enriched

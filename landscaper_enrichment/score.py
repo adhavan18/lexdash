@@ -13,12 +13,14 @@ import os
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 WEIGHTS = {
-    "years_in_business": 0.15,   # >15 yrs suggests an established, scaled shop
-    "employee_count": 0.30,      # strongest direct proxy when stated
-    "fleet_size": 0.20,
-    "service_area_count": 0.15,  # more cities served = bigger op
+    "years_in_business": 0.10,
+    "employee_count": 0.25,      # strongest direct proxy when stated
+    "fleet_size": 0.15,
+    "service_area_count": 0.10,  # more cities served = bigger op
     "commercial_client_flag": 0.10,
     "multi_location_flag": 0.10,
+    "review_count": 0.15,        # Apify Maps signal: crews/reviews scale with size
+    "rating": 0.05,
 }
 
 THRESHOLD = 0.5  # flag as likely >$5M above this normalized score
@@ -39,6 +41,8 @@ def score_record(signals: dict) -> float:
     client_types = set(signals.get("client_types") or [])
     s += WEIGHTS["commercial_client_flag"] * (1.0 if "commercial" in client_types or "municipal" in client_types else 0.0)
     s += WEIGHTS["multi_location_flag"] * (1.0 if signals.get("has_multiple_locations") else 0.0)
+    s += WEIGHTS["review_count"] * normalize(signals.get("review_count"), 150)
+    s += WEIGHTS["rating"] * normalize(signals.get("rating"), 5)
     return round(s, 3)
 
 
