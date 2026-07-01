@@ -16,12 +16,12 @@ def _headers():
     return {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 
-def _post(path, payload, retries=3):
+def _post(path, payload, retries=5):
     url = f"{BASE_URL}/{path}"
     for attempt in range(retries):
         resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
         if resp.status_code == 429:
-            time.sleep(2 ** attempt)
+            time.sleep(min(2 ** attempt, 30))
             continue
         resp.raise_for_status()
         return resp.json()

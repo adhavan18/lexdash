@@ -22,7 +22,30 @@ QUERY_TEMPLATES = [
 
 
 def domain(url: str) -> str:
-    return urlparse(url).netloc.lower().lstrip("www.")
+    netloc = urlparse(url).netloc.lower()
+    return netloc[4:] if netloc.startswith("www.") else netloc
+
+
+# directories, social platforms, media outlets, and PE/investment firms that
+# show up in search results but are not landscaping companies themselves
+EXCLUDED_DOMAINS = {
+    "linkedin.com", "apollo.io", "indeed.com", "ziprecruiter.com",
+    "yelp.com", "facebook.com", "instagram.com", "tiktok.com", "twitter.com",
+    "x.com", "youtube.com", "giftly.com", "bbb.org", "downtobid.com",
+    "lawnandlandscape.com", "landscapemanagement.net", "statista.com",
+    "wikipedia.org", "glassdoor.com", "zippia.com", "owler.com",
+    "manta.com", "yellowpages.com", "angi.com", "thumbtack.com",
+    "houzz.com", "buildzoom.com", "mapquest.com", "google.com",
+    "reddit.com",
+}
+
+EXCLUDED_KEYWORDS = ("capital", "partners", "equity", "ventures", "investors")
+
+
+def is_excluded(d: str) -> bool:
+    if d in EXCLUDED_DOMAINS:
+        return True
+    return any(k in d for k in EXCLUDED_KEYWORDS)
 
 
 def discover_region(region: str, limit_per_query: int = 10):
@@ -39,7 +62,7 @@ def discover_region(region: str, limit_per_query: int = 10):
             if not url:
                 continue
             d = domain(url)
-            if d in ("linkedin.com", "apollo.io", "indeed.com", "ziprecruiter.com"):
+            if is_excluded(d):
                 continue
             candidates.setdefault(d, {
                 "domain": d,
@@ -62,7 +85,7 @@ def main(regions):
         all_candidates.extend(found)
 
     out_path = os.path.join(DATA_DIR, "candidates.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(all_candidates, f, indent=2)
     print(f"Saved {len(all_candidates)} total candidates to {out_path}")
 

@@ -48,7 +48,7 @@ def score_record(signals: dict) -> float:
 
 def main():
     in_path = os.path.join(DATA_DIR, "enriched.json")
-    with open(in_path) as f:
+    with open(in_path, encoding="utf-8") as f:
         enriched = json.load(f)
 
     rows = []
@@ -73,7 +73,7 @@ def main():
     rows.sort(key=lambda x: x["score"], reverse=True)
 
     out_path = os.path.join(DATA_DIR, "scored.csv")
-    with open(out_path, "w", newline="") as f:
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else [])
         writer.writeheader()
         writer.writerows(rows)

@@ -35,7 +35,7 @@ def fetch_ranking_pages():
 
 def main():
     pages = fetch_ranking_pages()
-    with open(OUT_PATH, "w") as f:
+    with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(pages, f, indent=2)
     print(f"Saved {len(pages)} ranking pages to {OUT_PATH}")
     print("Next: manually or via LLM-parse the markdown tables into "

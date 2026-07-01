@@ -37,7 +37,7 @@ EXTRACT_PROMPT = (
 )
 
 
-def enrich_candidates(candidates, sleep_between=1.0):
+def enrich_candidates(candidates, sleep_between=3.0):
     enriched = []
     for c in candidates:
         url = c.get("sample_url")
@@ -59,13 +59,13 @@ def enrich_candidates(candidates, sleep_between=1.0):
 
 def main():
     in_path = os.path.join(DATA_DIR, "candidates.json")
-    with open(in_path) as f:
+    with open(in_path, encoding="utf-8") as f:
         candidates = json.load(f)
 
     enriched = enrich_candidates(candidates)
 
     out_path = os.path.join(DATA_DIR, "enriched.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(enriched, f, indent=2)
     print(f"Saved {len(enriched)} enriched records to {out_path}")
 

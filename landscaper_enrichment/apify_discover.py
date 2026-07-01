@@ -84,7 +84,7 @@ def main(regions, max_results=200):
         time.sleep(1)
 
     out_path = os.path.join(DATA_DIR, "candidates.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(all_candidates, f, indent=2)
     print(f"Saved {len(all_candidates)} total candidates to {out_path}")
 
