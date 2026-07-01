@@ -15,6 +15,7 @@ without losing earlier runs.
 """
 import json
 import os
+import re
 import time
 
 import requests
@@ -93,11 +94,25 @@ def run_actor(region: str, max_results: int, retries: int = 3):
     raise last_err
 
 
+MARKDOWN_LINK_RE = re.compile(r"^\[.*?\]\((https?://[^)]+)\)$")
+
+
+def clean_url(raw: str) -> str:
+    """Some Apify Maps fields come through as markdown links, e.g.
+    '[www.example.com](https://www.example.com)' -- unwrap those to the bare URL."""
+    if not raw:
+        return ""
+    raw = raw.strip()
+    m = MARKDOWN_LINK_RE.match(raw)
+    return m.group(1) if m else raw
+
+
 def normalize(place: dict, region: str) -> dict:
+    website = clean_url(place.get("website") or "")
     return {
-        "domain": (place.get("website") or "").replace("https://", "").replace("http://", "").split("/")[0],
+        "domain": website.replace("https://", "").replace("http://", "").split("/")[0],
         "name": place.get("title"),
-        "sample_url": place.get("website") or place.get("url"),
+        "sample_url": website or clean_url(place.get("url") or ""),
         "phone": place.get("phone"),
         "address": place.get("address"),
         "rating": place.get("totalScore"),
