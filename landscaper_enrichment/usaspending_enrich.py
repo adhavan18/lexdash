@@ -5,11 +5,14 @@ amounts under the Landscaping Services NAICS code (561730). This is real
 verified revenue for the subset of companies doing government grounds-
 maintenance work -- not a proxy like the other signals.
 
-No API key required. Run any time after discover.py/apify_discover.py has
-produced data/candidates.json; safe to re-run (idempotent, matches by name).
+No API key required. Run after enrich.py -- only checks companies that were
+actually enriched (data/enriched.json), not the full raw candidates.json, so
+a --limit 50 enrich.py run stays fast here too. Safe to re-run (idempotent,
+matches by domain, skips ones already looked up).
 """
 import json
 import os
+import sys
 import time
 
 import requests
@@ -52,8 +55,11 @@ def search_awards_for_company(company_name: str, retries: int = 3):
 
 
 def main():
-    candidates_path = os.path.join(DATA_DIR, "candidates.json")
-    with open(candidates_path, encoding="utf-8") as f:
+    enriched_path = os.path.join(DATA_DIR, "enriched.json")
+    if not os.path.exists(enriched_path):
+        print(f"No {enriched_path} found -- run enrich.py first.")
+        return
+    with open(enriched_path, encoding="utf-8") as f:
         candidates = json.load(f)
 
     govt_path = os.path.join(DATA_DIR, "govt_contracts.json")
@@ -62,10 +68,18 @@ def main():
         with open(govt_path, encoding="utf-8") as f:
             existing = json.load(f)
 
-    for c in candidates:
+    to_check = [c for c in candidates if c.get("domain") not in existing]
+
+    if "--limit" in sys.argv:
+        limit = int(sys.argv[sys.argv.index("--limit") + 1])
+        to_check = to_check[:limit]
+
+    print(f"{len(candidates) - len(to_check)} already checked or n/a, {len(to_check)} to check.")
+
+    for c in to_check:
         name = c.get("name") or c.get("title")
         domain = c.get("domain")
-        if not name or domain in existing:
+        if not name:
             continue
         print(f"Checking federal contracts for {name}...")
         awards = search_awards_for_company(name)
