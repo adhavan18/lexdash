@@ -62,12 +62,22 @@ def main():
     with open(in_path, encoding="utf-8") as f:
         candidates = json.load(f)
 
-    enriched = enrich_candidates(candidates)
-
     out_path = os.path.join(DATA_DIR, "enriched.json")
+    existing = []
+    if os.path.exists(out_path):
+        with open(out_path, encoding="utf-8") as f:
+            existing = json.load(f)
+    already_done = {r["domain"] for r in existing}
+
+    to_enrich = [c for c in candidates if c["domain"] not in already_done]
+    print(f"{len(already_done)} already enriched, {len(to_enrich)} new to process.")
+
+    newly_enriched = enrich_candidates(to_enrich)
+    all_enriched = existing + newly_enriched
+
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(enriched, f, indent=2)
-    print(f"Saved {len(enriched)} enriched records to {out_path}")
+        json.dump(all_enriched, f, indent=2)
+    print(f"Saved {len(all_enriched)} total enriched records to {out_path}")
 
 
 if __name__ == "__main__":

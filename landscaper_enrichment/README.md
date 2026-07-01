@@ -33,25 +33,48 @@ records, and scores them against a calibration set of companies with known
    refit the scoring weights in `score.py`.
 2. `discover.py "City, State" "City, State"` — searches for candidate
    companies per region via Firecrawl `/search`, excluding LinkedIn/Apollo/
-   job boards. Writes `data/candidates.json`.
+   job boards. Low volume (~10-20 per region); good for a quick pass.
+   **OR** `apify_discover.py "City, State"` — pulls Google Maps listings per
+   region via Apify's Google Maps Scraper actor (much higher volume, ~50-150
+   per region). Run once per region; each run **appends** new candidates to
+   `data/candidates.json` (deduped by domain), so running it across many
+   regions builds up a large combined candidate list over time. Requires
+   `APIFY_API_TOKEN` in `.env`.
 3. `enrich.py` — for each candidate's website, runs Firecrawl `/extract`
    with a schema pulling years in business, employee count, fleet size,
-   service areas, client types, certifications, multi-location flag. Writes
-   `data/enriched.json`.
+   service areas, client types, certifications, multi-location flag. Also
+   **appends**: skips domains already enriched in `data/enriched.json` so
+   re-runs only cost API calls for genuinely new candidates.
 4. `score.py` — combines signals into a weighted 0-1 score and flags
-   `likely_over_5m` above a threshold. Writes `data/scored.csv`.
+   `likely_over_5m` above a threshold. Writes `data/scored.csv` (recomputed
+   fresh from the full `enriched.json` each run, so it always reflects every
+   region enriched so far).
+5. `build_excel.py` — converts `data/scored.csv` into a styled Excel
+   workbook (`data/commercial_landscapers_by_state.xlsx`) with the pipeline
+   candidates grouped by region/state, plus a separate tab of companies with
+   confirmed trade-press revenue.
 
 ## Usage
 
 ```bash
 pip install -r requirements.txt
-# FIRECRAWL_API_KEY is already in .env
+# FIRECRAWL_API_KEY and APIFY_API_TOKEN should already be in .env
 
 python calibrate.py                       # ground truth (manual labeling step after)
-python discover.py "Dallas, TX" "Charlotte, NC"
+
+# Repeat this block once per region to build up volume:
+python apify_discover.py "Dallas, TX"
+python apify_discover.py "Charlotte, NC"
+python apify_discover.py "Phoenix, AZ"
+# ...add more regions as needed...
+
 python enrich.py
 python score.py
+python build_excel.py
 ```
+
+Roughly 5-8 mid-size metro regions at ~60-100 unique candidates each should
+clear 500 total rows in the "Pipeline Candidates" tab.
 
 ## Calibrating the weights
 
