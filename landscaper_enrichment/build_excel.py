@@ -5,11 +5,14 @@ with the confirmed trade-press companies (Lawn & Landscape Top 100 / LM150)
 found via manual research.
 
 Usage: python build_excel.py
-Output: data/commercial_landscapers_by_state.xlsx
+Output: data/commercial_landscapers_by_state_<timestamp>.xlsx -- each run
+creates a NEW file (never overwrites a prior one) so you can compare runs
+or keep a snapshot from before/after a change.
 """
 import csv
 import os
 import re
+from datetime import datetime
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -19,7 +22,8 @@ from confirmed_companies import CONFIRMED_ROWS
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCORED_PATH = os.path.join(DATA_DIR, "scored.csv")
-OUT_PATH = os.path.join(DATA_DIR, "commercial_landscapers_by_state.xlsx")
+TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+OUT_PATH = os.path.join(DATA_DIR, f"commercial_landscapers_by_state_{TIMESTAMP}.xlsx")
 
 STATE_TO_REGION = {
     "CT": "Northeast", "ME": "Northeast", "MA": "Northeast", "NH": "Northeast",

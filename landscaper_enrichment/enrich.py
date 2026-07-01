@@ -5,11 +5,18 @@ headcount language, branch count, client portfolio scale) using Firecrawl's
 structured /extract, plus an independent Indeed job-posting-volume check.
 
 Usage:
-    python enrich.py                # process candidates not yet enriched
-    python enrich.py --retry-failed # also re-process candidates whose last
-                                     # attempt failed (e.g. hit a 402/429/403),
-                                     # without re-spending API calls on ones
-                                     # that already succeeded
+    python enrich.py                  # process all candidates not yet enriched
+    python enrich.py --retry-failed   # also re-process candidates whose last
+                                       # attempt failed (e.g. hit a 402/429/403),
+                                       # without re-spending API calls on ones
+                                       # that already succeeded
+    python enrich.py --limit 50       # fast test run: only process the 50
+                                       # candidates most likely to be large
+                                       # (known trade-press companies first,
+                                       # then highest Google review counts) --
+                                       # good for quickly sanity-checking the
+                                       # pipeline before committing to a full
+                                       # multi-hundred-candidate run
 """
 import json
 import os
@@ -17,6 +24,7 @@ import sys
 import time
 
 from firecrawl_client import extract, search
+from confirmed_companies import BY_DOMAIN as KNOWN_TRADE_PRESS
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -129,7 +137,23 @@ def main():
 
     already_done = {r["domain"] for r in existing}
     to_enrich = [c for c in candidates if c["domain"] not in already_done]
-    print(f"{len(already_done)} already enriched (succeeded), {len(to_enrich)} to process.")
+
+    # prioritize candidates most likely to be large: known trade-press
+    # companies first, then by Google review count descending -- so a
+    # --limit test run surfaces real >$5M hits fast instead of spending
+    # its budget on small local outfits first
+    to_enrich.sort(key=lambda c: (
+        c["domain"] not in KNOWN_TRADE_PRESS,
+        -(c.get("review_count") or 0),
+    ))
+
+    limit = None
+    if "--limit" in sys.argv:
+        limit = int(sys.argv[sys.argv.index("--limit") + 1])
+        to_enrich = to_enrich[:limit]
+
+    print(f"{len(already_done)} already enriched (succeeded), {len(to_enrich)} to process"
+          + (f" (limited to top {limit} by known-company/review-count priority)" if limit else "") + ".")
 
     newly_enriched = enrich_candidates(to_enrich)
     all_enriched = existing + newly_enriched
