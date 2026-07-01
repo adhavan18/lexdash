@@ -1,14 +1,21 @@
 """
-Stage 3: estimate revenue primarily from employee count, since commercial
-landscaping is labor-intensive with a fairly consistent revenue-per-employee
-ratio industry-wide. Falls back to a multi-factor heuristic score only when
-no employee signal is available at all.
+Stage 3: estimate revenue by combining every available proxy, prioritizing
+the most direct/reliable signal available for each company:
 
-REVENUE_PER_EMPLOYEE is an industry rule-of-thumb ($100K-150K/FTE is the
-commonly cited range for commercial landscaping/grounds maintenance) --
-adjust it if you have better benchmark data (e.g. from calibrate.py's
-ground-truth set once you have both revenue and headcount for the same
-companies).
+  1. Confirmed federal contract dollars (USASpending.gov, real $ -- if this
+     alone clears $5M, that's verified, not estimated)
+  2. Employee count stated directly on the company website
+  3. Employee count estimated from Indeed job-posting volume
+  4. Employee count estimated from fleet/truck count
+  5. Employee count estimated from branch/location count
+  6. No employee signal at all -- fall back to a soft multi-factor score
+     (years in business, client portfolio size, sqft/acreage managed,
+     service area count, client types, review count/rating) for ranking
+     only, not a revenue estimate.
+
+REVENUE_PER_EMPLOYEE and the other per-signal multipliers are industry
+rules-of-thumb -- refit them once calibrate.py's ground-truth set has
+enough labeled (revenue, headcount) pairs.
 """
 import csv
 import json
@@ -16,21 +23,24 @@ import os
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-REVENUE_PER_EMPLOYEE = 120_000  # industry rule-of-thumb, adjust as calibrated
+REVENUE_PER_EMPLOYEE = 120_000
 REVENUE_THRESHOLD = 5_000_000
 MIN_EMPLOYEES_FOR_THRESHOLD = REVENUE_THRESHOLD / REVENUE_PER_EMPLOYEE  # ~42
 
-# used only as a fallback when no direct/fleet-based employee estimate exists
+EMPLOYEES_PER_TRUCK = 2.5
+EMPLOYEES_PER_JOB_POSTING = 15  # a company only has a fraction of its workforce open at once
+EMPLOYEES_PER_BRANCH = 15
+
 FALLBACK_WEIGHTS = {
-    "years_in_business": 0.20,
-    "service_area_count": 0.20,
-    "commercial_client_flag": 0.20,
-    "multi_location_flag": 0.20,
+    "years_in_business": 0.15,
+    "service_area_count": 0.15,
+    "commercial_client_flag": 0.15,
+    "multi_location_flag": 0.10,
+    "client_portfolio_size": 0.15,
+    "sqft_or_acreage_managed": 0.10,
     "review_count": 0.15,
     "rating": 0.05,
 }
-
-EMPLOYEES_PER_TRUCK = 2.5  # rough crew-size proxy when fleet_size is stated but headcount isn't
 
 
 def normalize(value, cap):
@@ -46,31 +56,60 @@ def fallback_score(signals: dict) -> float:
     client_types = set(signals.get("client_types") or [])
     s += FALLBACK_WEIGHTS["commercial_client_flag"] * (1.0 if "commercial" in client_types or "municipal" in client_types else 0.0)
     s += FALLBACK_WEIGHTS["multi_location_flag"] * (1.0 if signals.get("has_multiple_locations") else 0.0)
+    s += FALLBACK_WEIGHTS["client_portfolio_size"] * normalize(signals.get("client_portfolio_size"), 200)
+    s += FALLBACK_WEIGHTS["sqft_or_acreage_managed"] * (1.0 if signals.get("sqft_or_acreage_managed") else 0.0)
     s += FALLBACK_WEIGHTS["review_count"] * normalize(signals.get("review_count"), 150)
     s += FALLBACK_WEIGHTS["rating"] * normalize(signals.get("rating"), 5)
     return round(s, 3)
 
 
 def estimate_employees(signals: dict):
-    """Returns (estimated_employees, source) where source explains how we got the number."""
-    employee_count = signals.get("employee_count")
-    if employee_count:
-        return employee_count, "stated_on_website"
+    """Returns (estimated_employees, source), trying each proxy in priority order."""
+    if signals.get("employee_count"):
+        return signals["employee_count"], "stated_on_website"
 
-    fleet_size = signals.get("fleet_size")
-    if fleet_size:
-        return round(fleet_size * EMPLOYEES_PER_TRUCK, 1), "estimated_from_fleet_size"
+    job_postings = signals.get("indeed_job_postings")
+    if job_postings:
+        return round(job_postings * EMPLOYEES_PER_JOB_POSTING, 1), "estimated_from_job_postings"
+
+    if signals.get("fleet_size"):
+        return round(signals["fleet_size"] * EMPLOYEES_PER_TRUCK, 1), "estimated_from_fleet_size"
+
+    if signals.get("location_count"):
+        return round(signals["location_count"] * EMPLOYEES_PER_BRANCH, 1), "estimated_from_location_count"
 
     return None, "unknown"
 
 
-def score_record(signals: dict) -> dict:
+def load_govt_contracts():
+    path = os.path.join(DATA_DIR, "govt_contracts.json")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def score_record(domain: str, signals: dict, govt_contracts: dict) -> dict:
+    govt = govt_contracts.get(domain, {})
+    confirmed_govt_usd = govt.get("total_federal_landscaping_awards_usd", 0) or 0
+
     employees, employee_source = estimate_employees(signals)
 
-    if employees is not None:
+    if confirmed_govt_usd >= REVENUE_THRESHOLD:
+        # federal contract dollars alone already clear the bar -- verified, not estimated
+        estimated_revenue = confirmed_govt_usd
+        likely_over_5m = True
+        confidence = "confirmed_federal_contracts"
+    elif employees is not None:
         estimated_revenue = round(employees * REVENUE_PER_EMPLOYEE)
+        # federal contracts are a partial revenue floor -- take whichever estimate is higher
+        estimated_revenue = max(estimated_revenue, confirmed_govt_usd)
         likely_over_5m = estimated_revenue >= REVENUE_THRESHOLD
         confidence = "employee_based"
+    elif confirmed_govt_usd > 0:
+        estimated_revenue = confirmed_govt_usd
+        likely_over_5m = False
+        confidence = "partial_federal_contracts_only"
     else:
         estimated_revenue = None
         likely_over_5m = False
@@ -79,10 +118,11 @@ def score_record(signals: dict) -> dict:
     return {
         "estimated_employees": employees,
         "employee_source": employee_source,
+        "confirmed_federal_contracts_usd": confirmed_govt_usd,
         "estimated_revenue_usd": estimated_revenue,
         "likely_over_5m": likely_over_5m,
         "confidence": confidence,
-        "fallback_score": fallback_score(signals),  # secondary ranking signal, always computed
+        "fallback_score": fallback_score(signals),
     }
 
 
@@ -91,10 +131,12 @@ def main():
     with open(in_path, encoding="utf-8") as f:
         enriched = json.load(f)
 
+    govt_contracts = load_govt_contracts()
+
     rows = []
     for r in enriched:
         signals = r.get("signals", {})
-        est = score_record(signals)
+        est = score_record(r["domain"], signals, govt_contracts)
         rows.append({
             "domain": r["domain"],
             "region": r.get("region"),
@@ -102,6 +144,10 @@ def main():
             **est,
             "years_in_business": signals.get("years_in_business"),
             "fleet_size": signals.get("fleet_size"),
+            "location_count": signals.get("location_count"),
+            "client_portfolio_size": signals.get("client_portfolio_size"),
+            "sqft_or_acreage_managed": signals.get("sqft_or_acreage_managed"),
+            "indeed_job_postings": signals.get("indeed_job_postings"),
             "review_count": signals.get("review_count"),
             "rating": signals.get("rating"),
             "service_areas": ";".join(signals.get("service_areas") or []),
@@ -110,8 +156,18 @@ def main():
             "sample_url": r.get("sample_url"),
         })
 
-    # employee-based estimates first (most trustworthy), then by fallback score
-    rows.sort(key=lambda x: (x["estimated_revenue_usd"] is None, -(x["estimated_revenue_usd"] or 0), -x["fallback_score"]))
+    # verified federal contracts first, then employee-based estimates, then fallback score
+    confidence_rank = {
+        "confirmed_federal_contracts": 0,
+        "employee_based": 1,
+        "partial_federal_contracts_only": 2,
+        "fallback_heuristic_only": 3,
+    }
+    rows.sort(key=lambda x: (
+        confidence_rank.get(x["confidence"], 9),
+        -(x["estimated_revenue_usd"] or 0),
+        -x["fallback_score"],
+    ))
 
     out_path = os.path.join(DATA_DIR, "scored.csv")
     with open(out_path, "w", newline="", encoding="utf-8") as f:
@@ -121,10 +177,11 @@ def main():
 
     with_employees = [r for r in rows if r["estimated_employees"] is not None]
     flagged = [r for r in rows if r["likely_over_5m"]]
+    confirmed = [r for r in rows if r["confidence"] == "confirmed_federal_contracts"]
     print(f"Scored {len(rows)} companies")
-    print(f"  {len(with_employees)} have an employee estimate (stated or fleet-derived)")
-    print(f"  {len(flagged)} flagged as likely >$5M (>= ~{int(MIN_EMPLOYEES_FOR_THRESHOLD)} employees "
-          f"at ${REVENUE_PER_EMPLOYEE:,}/employee)")
+    print(f"  {len(with_employees)} have an employee estimate (stated, job-postings, fleet, or branch-derived)")
+    print(f"  {len(confirmed)} have verified federal contract dollars alone clearing $5M")
+    print(f"  {len(flagged)} total flagged as likely >$5M")
     print(f"Full results: {out_path}")
 
 

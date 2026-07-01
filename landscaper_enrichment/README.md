@@ -42,14 +42,24 @@ records, and scores them against a calibration set of companies with known
    `APIFY_API_TOKEN` in `.env`.
 3. `enrich.py` — for each candidate's website, runs Firecrawl `/extract`
    with a schema pulling years in business, employee count, fleet size,
+   branch/location count, client portfolio size, sq ft/acreage managed,
    service areas, client types, certifications, multi-location flag. Also
-   **appends**: skips domains already enriched in `data/enriched.json` so
+   does an independent Indeed job-posting-volume search per company (via
+   Firecrawl web search, not LinkedIn/Apollo) as a second headcount proxy.
+   **Appends**: skips domains already enriched in `data/enriched.json` so
    re-runs only cost API calls for genuinely new candidates.
-4. `score.py` — combines signals into a weighted 0-1 score and flags
-   `likely_over_5m` above a threshold. Writes `data/scored.csv` (recomputed
-   fresh from the full `enriched.json` each run, so it always reflects every
-   region enriched so far).
-5. `build_excel.py` — converts `data/scored.csv` into a styled Excel
+4. `usaspending_enrich.py` (optional, additive) — looks up each candidate on
+   USASpending.gov's free public API for federal contract dollars under the
+   Landscaping Services NAICS code (561730). No API key needed. Writes
+   `data/govt_contracts.json`; safe to re-run anytime.
+5. `score.py` — combines every available signal into a revenue estimate,
+   prioritizing the most reliable one available per company: confirmed
+   federal contract dollars > employee count stated on-site > employee
+   count estimated from job postings > from fleet size > from branch count
+   > a soft fallback score when no employee signal exists at all. Writes
+   `data/scored.csv` (recomputed fresh from `enriched.json` +
+   `govt_contracts.json` each run).
+6. `build_excel.py` — converts `data/scored.csv` into a styled Excel
    workbook (`data/commercial_landscapers_by_state.xlsx`) with the pipeline
    candidates grouped by region/state, plus a separate tab of companies with
    confirmed trade-press revenue.
@@ -69,6 +79,7 @@ python apify_discover.py "Phoenix, AZ"
 # ...add more regions as needed...
 
 python enrich.py
+python usaspending_enrich.py              # optional, free, adds verified federal contract $
 python score.py
 python build_excel.py
 ```
@@ -76,20 +87,17 @@ python build_excel.py
 Roughly 5-8 mid-size metro regions at ~60-100 unique candidates each should
 clear 500 total rows in the "Pipeline Candidates" tab.
 
-## Calibrating the weights
+## Calibrating the constants
 
-`score.py`'s `WEIGHTS` dict is a starting heuristic. Once
-`data/calibration_labeled.csv` has enough rows, fit real weights: enrich the
-labeled companies the same way (run them through `enrich.py`), then run a
-logistic/linear regression of `signals -> revenue_usd` to replace the
-hand-picked weights with fitted coefficients and pick a data-driven
-threshold for the $5M cutoff.
+`score.py`'s `REVENUE_PER_EMPLOYEE` ($120K), `EMPLOYEES_PER_TRUCK` (2.5),
+`EMPLOYEES_PER_JOB_POSTING` (15), and `EMPLOYEES_PER_BRANCH` (15) are
+industry rules-of-thumb, not fitted values. Once
+`data/calibration_labeled.csv` has enough rows (company, revenue, and ideally
+headcount if you can find it), refit these against real (revenue, headcount)
+pairs from the Top 100/LM150 companies rather than relying on the defaults.
 
-## Note on Apify
+## Deliberately not using LinkedIn or Apollo
 
-The original ask mentioned Apify as an alternative to Firecrawl (e.g. its
-Google Maps Scraper actor for stage 1 discovery, which returns richer Maps
-fields like review_count/rating directly). This pipeline currently only
-wires up Firecrawl; swapping `discover.py`'s search step for an Apify Google
-Maps Scraper run is a straightforward follow-up if an Apify API token is
-provided.
+Every signal in this pipeline comes from company websites, Google Maps,
+Indeed search results, and USASpending.gov — not LinkedIn or Apollo, which
+don't carry reliable revenue data for private companies anyway.

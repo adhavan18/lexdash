@@ -1,13 +1,14 @@
 """
 Stage 2: enrich each candidate with revenue-proxy signals scraped from its
 own website (fleet size, years in business, service area, client types,
-headcount language) using Firecrawl's structured /extract.
+headcount language, branch count, client portfolio scale) using Firecrawl's
+structured /extract, plus an independent Indeed job-posting-volume check.
 """
 import json
 import os
 import time
 
-from firecrawl_client import extract
+from firecrawl_client import extract, search
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -17,6 +18,9 @@ EXTRACT_SCHEMA = {
         "years_in_business": {"type": "number", "description": "How many years the company has operated, if stated"},
         "employee_count": {"type": "number", "description": "Number of employees/team members/staff, if stated anywhere on the site (About, Careers, Our Team pages often mention this, e.g. '150+ employees' or 'team of 200')"},
         "fleet_size": {"type": "number", "description": "Number of trucks/vehicles/crews mentioned, if any"},
+        "location_count": {"type": "number", "description": "Number of branch offices/locations, if stated (e.g. 'serving from 5 locations')"},
+        "client_portfolio_size": {"type": "number", "description": "Number of properties, HOAs, or clients under contract, if stated (e.g. 'we maintain 200+ properties')"},
+        "sqft_or_acreage_managed": {"type": "string", "description": "Square footage or acreage under management, if stated (e.g. '10 million sq ft', '500 acres')"},
         "service_areas": {"type": "array", "items": {"type": "string"}, "description": "Cities/regions served"},
         "client_types": {
             "type": "array",
@@ -34,16 +38,32 @@ EXTRACT_PROMPT = (
     "website. Employee count is the most important field -- check About Us, "
     "Careers, Our Team, and homepage hero text for phrasing like 'our team of "
     "X', 'X employees', 'X+ crew members', or similar. Also extract: years in "
-    "business, fleet/truck/crew count, service areas, client types served, "
-    "certifications, and whether it has multiple branch locations. Leave "
-    "fields blank if not stated; do not guess or estimate."
+    "business, fleet/truck/crew count, number of branch locations, number of "
+    "properties/HOAs/clients served, square footage or acreage under "
+    "management, service areas, client types served, certifications, and "
+    "whether it has multiple branch locations. Leave fields blank if not "
+    "stated; do not guess or estimate."
 )
+
+
+def count_indeed_job_postings(company_name: str) -> int:
+    """Uses Firecrawl web search (not LinkedIn/Apollo) as a proxy for open-role
+    volume on Indeed. Returns the number of distinct Indeed job postings found
+    for this company name -- a rough independent headcount signal."""
+    if not company_name:
+        return 0
+    try:
+        results = search(f'site:indeed.com "{company_name}" jobs', limit=20)
+    except Exception:
+        return 0
+    return sum(1 for r in results if "indeed.com" in (r.get("url") or ""))
 
 
 def enrich_candidates(candidates, sleep_between=3.0):
     enriched = []
     for c in candidates:
         url = c.get("sample_url")
+        name = c.get("name") or c.get("title")
         print(f"Enriching {c['domain']}...")
         record = dict(c)
         try:
@@ -52,9 +72,15 @@ def enrich_candidates(candidates, sleep_between=3.0):
         except Exception as e:
             print(f"  extract failed: {e}")
             record["signals"] = {}
+
         # carry over Maps-sourced signals (present when discovered via apify_discover.py)
         record["signals"]["review_count"] = c.get("review_count")
         record["signals"]["rating"] = c.get("rating")
+
+        # independent job-posting-volume signal (Indeed via web search, not LinkedIn/Apollo)
+        job_count = count_indeed_job_postings(name)
+        record["signals"]["indeed_job_postings"] = job_count
+
         enriched.append(record)
         time.sleep(sleep_between)
     return enriched

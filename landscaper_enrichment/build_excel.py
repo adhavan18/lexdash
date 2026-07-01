@@ -103,28 +103,33 @@ def main():
             if cell.value is not None:
                 cell.number_format = "$#,##0"
 
-    # Sheet 2: pipeline candidates (Apify/Firecrawl discovered, employee-based revenue estimate)
+    # Sheet 2: pipeline candidates (Apify/Firecrawl discovered, combined revenue estimate)
     ws2 = wb.create_sheet("Pipeline Candidates")
-    headers2 = ["Domain", "Region", "State", "Estimated Employees", "Employee Source",
-                "Estimated Revenue (USD)", "Likely >$5M", "Fallback Score", "Review Count",
-                "Years in Business", "Fleet Size", "Client Types", "Website"]
+    headers2 = ["Domain", "Region", "State", "Confidence", "Estimated Employees", "Employee Source",
+                "Estimated Revenue (USD)", "Confirmed Federal Contracts (USD)", "Likely >$5M",
+                "Fallback Score", "Review Count", "Years in Business", "Fleet Size", "Location Count",
+                "Client Portfolio Size", "Sqft/Acreage Managed", "Indeed Job Postings", "Client Types", "Website"]
     ws2.append(headers2)
     style_header(ws2, len(headers2))
     for r in scored_rows:
         state = parse_state(r.get("region", ""))
         ws2.append([
-            r.get("domain"), r.get("region"), state, r.get("estimated_employees"),
-            r.get("employee_source"), r.get("estimated_revenue_usd"), r.get("likely_over_5m"),
-            r.get("fallback_score"), r.get("review_count"),
-            r.get("years_in_business"), r.get("fleet_size"), r.get("client_types"), r.get("sample_url"),
+            r.get("domain"), r.get("region"), state, r.get("confidence"),
+            r.get("estimated_employees"), r.get("employee_source"),
+            r.get("estimated_revenue_usd"), r.get("confirmed_federal_contracts_usd"),
+            r.get("likely_over_5m"), r.get("fallback_score"), r.get("review_count"),
+            r.get("years_in_business"), r.get("fleet_size"), r.get("location_count"),
+            r.get("client_portfolio_size"), r.get("sqft_or_acreage_managed"),
+            r.get("indeed_job_postings"), r.get("client_types"), r.get("sample_url"),
         ])
     for i, h in enumerate(headers2, 1):
         ws2.column_dimensions[get_column_letter(i)].width = max(16, len(h) + 4)
-    ws2.column_dimensions["M"].width = 40
-    for row in ws2.iter_rows(min_row=2, min_col=6, max_col=6):
-        for cell in row:
-            if cell.value not in (None, ""):
-                cell.number_format = "$#,##0"
+    ws2.column_dimensions["S"].width = 40
+    for col in ("G", "H"):
+        for row in ws2.iter_rows(min_row=2, min_col=ord(col) - 64, max_col=ord(col) - 64):
+            for cell in row:
+                if cell.value not in (None, ""):
+                    cell.number_format = "$#,##0"
 
     # Sheet 3: everything grouped by region/state (confirmed + pipeline combined)
     ws3 = wb.create_sheet("By Region & State")
@@ -161,25 +166,37 @@ def main():
         ["via manual web search (the source sites block automated scraping)."],
         [""],
         [f"'Pipeline Candidates' tab: {len(scored_rows)} companies discovered via"],
-        ["apify_discover.py (Google Maps) + enrich.py (website scraping) + score.py."],
+        ["apify_discover.py (Google Maps) + enrich.py (website scraping + Indeed job-posting"],
+        ["count) + usaspending_enrich.py (federal contract lookup) + score.py."],
         [""],
-        ["Revenue is now ESTIMATED FROM EMPLOYEE COUNT: commercial landscaping is"],
-        ["labor-intensive with a fairly consistent revenue-per-employee ratio industry-wide."],
-        ["  Estimated Revenue = Estimated Employees x $120,000/employee (score.py's"],
-        ["  REVENUE_PER_EMPLOYEE constant -- adjust if you have a better benchmark)."],
-        ["  Estimated Employees comes from (in priority order):"],
-        ["    1. employee_count stated directly on the company website (most reliable)"],
-        ["    2. fleet_size x 2.5 (crew-size proxy) when headcount isn't stated but a"],
-        ["       fleet/truck count is mentioned"],
-        ["    3. unknown -- no employee estimate available, 'Likely >$5M' defaults to False"],
-        ["       and 'Fallback Score' (the old multi-factor heuristic: years in business,"],
-        ["       service area count, client types, review count/rating) is the only signal"],
-        ["       -- use it to rank/spot-check, not as a revenue estimate."],
+        ["'Confidence' column, in priority order (best signal wins per company):"],
+        ["  1. confirmed_federal_contracts -- USASpending.gov shows this company alone"],
+        ["     holds >= $5M in federal landscaping (NAICS 561730) contract awards."],
+        ["     This is VERIFIED dollar data, not an estimate."],
+        ["  2. employee_based -- Estimated Revenue = Estimated Employees x $120,000/employee"],
+        ["     (score.py's REVENUE_PER_EMPLOYEE constant, an industry rule-of-thumb)."],
+        ["     Estimated Employees comes from, in priority order:"],
+        ["       a. employee_count stated directly on the company website (most reliable)"],
+        ["       b. indeed_job_postings x 15 -- open-role volume on Indeed as an independent"],
+        ["          headcount proxy (a company only has a fraction of staff hiring at once)"],
+        ["       c. fleet_size x 2.5 -- crew-size proxy from stated truck/fleet count"],
+        ["       d. location_count x 15 -- average branch size proxy from stated office count"],
+        ["  3. partial_federal_contracts_only -- has some federal contract dollars, but not"],
+        ["     enough alone to clear $5M, and no employee estimate available either."],
+        ["  4. fallback_heuristic_only -- no employee or contract signal at all. 'Likely >$5M'"],
+        ["     defaults to False; 'Fallback Score' (years in business, client portfolio size,"],
+        ["     sqft/acreage managed, service area count, client types, review count/rating)"],
+        ["     is the only ranking signal -- use it to spot-check manually, not as a revenue"],
+        ["     estimate."],
         [""],
-        ["This is still an ESTIMATE, not verified revenue -- most company websites don't"],
-        ["state headcount, so many rows will have no employee estimate at all. Pair with"],
-        ["USASpending.gov contract-value lookups for companies doing government work for"],
-        ["actual dollar verification on that subset."],
+        ["Everything except 'confirmed_federal_contracts' is still an ESTIMATE. Most company"],
+        ["websites don't state headcount, so many rows will fall back to weaker proxies or"],
+        ["no employee estimate at all -- treat this as a ranked shortlist to manually verify,"],
+        ["not ground truth."],
+        [""],
+        ["To add the federal contract check: python usaspending_enrich.py (free API, no key"],
+        ["needed) before running score.py -- it writes data/govt_contracts.json which"],
+        ["score.py automatically picks up if present."],
         [""],
         ["To grow the Pipeline Candidates count toward 500+:"],
         ["  Run apify_discover.py once per additional region, e.g.:"],
