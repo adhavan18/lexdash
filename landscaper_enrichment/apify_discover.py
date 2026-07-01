@@ -123,14 +123,36 @@ def normalize(place: dict, region: str) -> dict:
     }
 
 
+# Google Maps category must contain one of these to be kept -- filters out
+# the roofing/pool/electrician/HOA-management noise that Maps' fuzzy search
+# term matching pulls in alongside real landscaping businesses.
+LANDSCAPING_CATEGORY_KEYWORDS = (
+    "landscap", "lawn", "grounds", "tree service", "arborist", "irrigation",
+    "turf", "hardscap", "garden", "nursery",
+)
+
+
+def is_landscaping_category(category: str) -> bool:
+    if not category:
+        return False
+    category = category.lower()
+    return any(kw in category for kw in LANDSCAPING_CATEGORY_KEYWORDS)
+
+
 def discover_region(region: str, max_results: int = 100):
     places = run_actor(region, max_results)
     candidates = {}
+    dropped_off_category = 0
     for p in places:
         rec = normalize(p, region)
         if not rec["domain"]:
             continue
+        if not is_landscaping_category(rec["category"]):
+            dropped_off_category += 1
+            continue
         candidates.setdefault(rec["domain"], rec)
+    if dropped_off_category:
+        print(f"  dropped {dropped_off_category} results with a non-landscaping Maps category")
     return list(candidates.values())
 
 

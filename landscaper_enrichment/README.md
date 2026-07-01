@@ -36,7 +36,11 @@ records, and scores them against a calibration set of companies with known
    job boards. Low volume (~10-20 per region); good for a quick pass.
    **OR** `apify_discover.py "City, State"` — pulls Google Maps listings per
    region via Apify's Google Maps Scraper actor (much higher volume, ~50-150
-   per region). Run once per region; each run **appends** new candidates to
+   per region). Drops any result whose Google Maps category doesn't contain
+   a landscaping-related keyword (landscap/lawn/grounds/tree service/
+   arborist/irrigation/turf/hardscape/garden/nursery) -- filters out the
+   roofing/pool/electrician-type noise that fuzzy Maps search term matching
+   pulls in. Run once per region; each run **appends** new candidates to
    `data/candidates.json` (deduped by domain), so running it across many
    regions builds up a large combined candidate list over time. Requires
    `APIFY_API_TOKEN` in `.env`.
@@ -56,7 +60,12 @@ records, and scores them against a calibration set of companies with known
    prioritizing the most reliable one available per company: confirmed
    federal contract dollars > employee count stated on-site > employee
    count estimated from job postings > from fleet size > from branch count
-   > a soft fallback score when no employee signal exists at all. Writes
+   > a soft fallback score when no employee signal exists at all. Also
+   excludes any company whose website explicitly states residential
+   clients only with no commercial/municipal/industrial mention (confirmed
+   trade-press companies are never excluded this way, even if their site
+   text wasn't scraped) -- those go to `data/excluded_non_commercial.csv`
+   instead, so you can review what got filtered out. Writes
    `data/scored.csv` (recomputed fresh from `enriched.json` +
    `govt_contracts.json` each run).
 6. `build_excel.py` — converts `data/scored.csv` into a styled Excel

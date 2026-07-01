@@ -182,6 +182,16 @@ def manual_verification_priority(confidence, employee_source, estimated_revenue,
     return "Low", "Weak signals across the board -- deprioritize"
 
 
+COMMERCIAL_CLIENT_TYPES = {"commercial", "municipal", "industrial"}
+
+
+def is_residential_only(client_types: set) -> bool:
+    """True only when the site clearly states residential clients and never
+    mentions any commercial-ish client type -- i.e. we have positive evidence
+    it's not a commercial landscaper, not just an absence of information."""
+    return "residential" in client_types and not (client_types & COMMERCIAL_CLIENT_TYPES)
+
+
 def main():
     in_path = os.path.join(DATA_DIR, "enriched.json")
     with open(in_path, encoding="utf-8") as f:
@@ -190,10 +200,12 @@ def main():
     govt_contracts = load_govt_contracts()
 
     rows = []
+    excluded_rows = []
     for r in enriched:
         signals = r.get("signals", {})
         est = score_record(r["domain"], signals, govt_contracts)
-        rows.append({
+        client_types_set = set(signals.get("client_types") or [])
+        row = {
             "domain": r["domain"],
             "region": r.get("region"),
             "title": r.get("title") or r.get("name"),
@@ -207,10 +219,17 @@ def main():
             "review_count": signals.get("review_count"),
             "rating": signals.get("rating"),
             "service_areas": ";".join(signals.get("service_areas") or []),
-            "client_types": ";".join(signals.get("client_types") or []),
+            "client_types": ";".join(client_types_set),
             "has_multiple_locations": signals.get("has_multiple_locations"),
             "sample_url": r.get("sample_url"),
-        })
+        }
+        # confirmed trade-press companies are commercial by definition even if
+        # their site's client_types wasn't scraped -- never exclude those
+        if est["confidence"] != "confirmed_trade_press" and is_residential_only(client_types_set):
+            row["excluded_reason"] = "Website states residential clients only, no commercial/municipal/industrial mention"
+            excluded_rows.append(row)
+        else:
+            rows.append(row)
 
     # verified trade-press/federal data first, then employee-based estimates, then fallback score
     confidence_rank = {
@@ -232,11 +251,20 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
+    if excluded_rows:
+        excluded_path = os.path.join(DATA_DIR, "excluded_non_commercial.csv")
+        with open(excluded_path, "w", newline="", encoding="utf-8") as f:
+            fieldnames = list(excluded_rows[0].keys())
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(excluded_rows)
+
     with_employees = [r for r in rows if r["estimated_employees"] is not None]
     flagged = [r for r in rows if r["likely_over_5m"]]
     confirmed = [r for r in rows if r["confidence"] == "confirmed_federal_contracts"]
     high_priority = [r for r in rows if r["manual_verification_priority"] == "High"]
-    print(f"Scored {len(rows)} companies")
+    print(f"Scored {len(rows)} companies (commercial only)")
+    print(f"  {len(excluded_rows)} excluded as residential-only (see data/excluded_non_commercial.csv)")
     print(f"  {len(with_employees)} have an employee estimate (stated, job-postings, fleet, or branch-derived)")
     print(f"  {len(confirmed)} have verified federal contract dollars alone clearing $5M")
     print(f"  {len(flagged)} total flagged as likely >$5M")
